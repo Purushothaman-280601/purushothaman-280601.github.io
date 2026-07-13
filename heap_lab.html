@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>FreeRTOS Heap Lab</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root{
+  --bg:#0a0e14; --panel:#11161d; --panel2:#161c25; --border:#232b36; --border2:#2c3542;
+  --text:#e3e8ef; --muted:#7a8699; --muted2:#57657a;
+  --alloc:#e8973d; --alloc-dim:#7a5324; --free:#2dd4a7; --free-dim:#175f4e;
+  --header:#a78bfa; --highlight:#f5d90a; --danger:#f2545b; --ok:#3ddc84; --accent:#57b8ff;
+}
+*{box-sizing:border-box;}
+body{margin:0;background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;font-size:14px;line-height:1.5;}
+h1,h2,h3,h4{font-family:'Space Grotesk',sans-serif;margin:0 0 8px;font-weight:600;}
+code,.mono{font-family:'JetBrains Mono',monospace;}
+::selection{background:var(--accent);color:#000;}
+
+header.top{padding:20px 24px 0;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:10;}
+header.top h1{font-size:20px;letter-spacing:.2px;}
+header.top .sub{color:var(--muted);font-size:12.5px;margin-bottom:14px;}
+nav.tabs{display:flex;gap:2px;overflow-x:auto;}
+nav.tabs button{background:none;border:none;color:var(--muted);padding:10px 14px;font-family:'Space Grotesk',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap;}
+nav.tabs button:hover{color:var(--text);}
+nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent);}
+
+main{max-width:1180px;margin:0 auto;padding:20px 24px 80px;}
+section.tabpanel{display:none;animation:fade .2s ease;}
+section.tabpanel.active{display:block;}
+@keyframes fade{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:14px;}
+.card h3{font-size:14px;color:var(--accent);text-transform:uppercase;letter-spacing:.5px;font-size:11.5px;margin-bottom:10px;}
+.grid2{display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start;}
+@media(max-width:880px){.grid2{grid-template-columns:1fr;}}
+
+ul.bullets{margin:0;padding-left:18px;}
+ul.bullets li{margin-bottom:6px;}
+.pill{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-family:'JetBrains Mono',monospace;border:1px solid var(--border2);color:var(--muted);}
+.pill.alloc{color:var(--alloc);border-color:var(--alloc-dim);}
+.pill.free{color:var(--free);border-color:var(--free-dim);}
+
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:12px;}
+.controls label{font-size:12px;color:var(--muted);display:flex;align-items:center;gap:6px;}
+input[type=number],input[type=range]{background:var(--panel2);border:1px solid var(--border2);color:var(--text);border-radius:6px;padding:5px 8px;font-family:'JetBrains Mono',monospace;width:80px;}
+input[type=range]{width:120px;padding:0;}
+button.btn{background:var(--panel2);border:1px solid var(--border2);color:var(--text);padding:7px 12px;border-radius:6px;font-family:'Space Grotesk',sans-serif;font-weight:600;font-size:12.5px;cursor:pointer;}
+button.btn:hover{border-color:var(--accent);color:var(--accent);}
+button.btn.primary{background:var(--accent);color:#00131f;border-color:var(--accent);}
+button.btn.primary:hover{filter:brightness(1.1);}
+button.btn.danger{color:var(--danger);}
+button.btn:disabled{opacity:.4;cursor:not-allowed;}
+.toggle{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);cursor:pointer;user-select:none;}
+.toggle input{accent-color:var(--accent);}
+
+/* heap bar */
+.heapbar-wrap{margin:10px 0 6px;}
+.heapbar{display:flex;height:46px;border-radius:6px;overflow:hidden;border:1px solid var(--border2);background:#000;}
+.blk{position:relative;height:100%;border-right:1px solid rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:10px;color:#00131f;overflow:hidden;transition:filter .15s;cursor:default;}
+.blk:last-child{border-right:none;}
+.blk.free{background:var(--free);color:#00231b;}
+.blk.alloc{background:var(--alloc);}
+.blk .hdrseg{position:absolute;left:0;top:0;bottom:0;background:var(--header);width:8px;}
+.blk .slackseg{position:absolute;right:0;top:0;bottom:0;background:repeating-linear-gradient(45deg,rgba(0,0,0,.35) 0 4px,transparent 4px 8px);}
+.blk.scanning{outline:2px solid var(--highlight);outline-offset:-2px;z-index:2;}
+.blk.chosen{outline:2px solid #fff;outline-offset:-2px;z-index:3;}
+.blk.merging{animation:pulse .5s ease 2;}
+@keyframes pulse{0%,100%{filter:brightness(1);}50%{filter:brightness(1.6);}}
+.heap-legend{display:flex;gap:14px;font-size:11px;color:var(--muted);margin-top:6px;flex-wrap:wrap;}
+.heap-legend span{display:inline-flex;align-items:center;gap:5px;}
+.swatch{width:10px;height:10px;border-radius:2px;display:inline-block;}
+
+/* free list diagram */
+.freelist{display:flex;flex-wrap:wrap;gap:0;align-items:center;margin:10px 0;min-height:44px;}
+.flnode{background:var(--panel2);border:1px solid var(--free-dim);color:var(--free);font-family:'JetBrains Mono',monospace;font-size:11px;padding:6px 10px;border-radius:6px;position:relative;}
+.flnode.chosen{border-color:#fff;box-shadow:0 0 0 1px #fff;}
+.flnode.scanning{border-color:var(--highlight);}
+.flarrow{color:var(--muted2);padding:0 6px;font-size:13px;}
+.flempty{color:var(--muted);font-size:12px;font-style:italic;}
+
+/* allocated chips */
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0;}
+.chip{background:var(--alloc-dim);border:1px solid var(--alloc);color:#ffd9a8;font-family:'JetBrains Mono',monospace;font-size:11px;padding:4px 6px 4px 10px;border-radius:14px;display:flex;align-items:center;gap:6px;}
+.chip button{background:none;border:none;color:#ffd9a8;cursor:pointer;font-weight:700;padding:2px 6px;border-radius:50%;}
+.chip button:hover{background:rgba(255,255,255,.15);}
+
+/* stats */
+.stats{display:flex;gap:18px;flex-wrap:wrap;margin:8px 0 4px;font-size:12px;}
+.stats b{color:var(--text);font-family:'JetBrains Mono',monospace;}
+.stats .k{color:var(--muted);}
+
+/* log */
+.log{background:#000;border:1px solid var(--border2);border-radius:6px;padding:8px 10px;height:120px;overflow-y:auto;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#9fe8b8;}
+.log div{margin-bottom:3px;}
+.log .fail{color:var(--danger);}
+.log .warn{color:var(--highlight);}
+
+/* prediction panel */
+.predict{background:#1a1305;border:1px solid #4a3a10;border-radius:8px;padding:12px 14px;margin:10px 0;}
+.predict h4{color:var(--highlight);margin:0 0 8px;font-size:12.5px;text-transform:uppercase;letter-spacing:.4px;}
+.predict .opts{display:flex;flex-wrap:wrap;gap:8px;}
+.predict button{background:var(--panel2);border:1px solid var(--border2);color:var(--text);padding:8px 12px;border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:12px;cursor:pointer;}
+.predict button:hover{border-color:var(--highlight);}
+.predict button.correct{background:var(--ok);color:#002b12;border-color:var(--ok);}
+.predict button.wrong{background:var(--danger);color:#2b0006;border-color:var(--danger);}
+.predict .verdict{margin-top:10px;font-size:12.5px;}
+.predict .verdict.ok{color:var(--ok);}
+.predict .verdict.bad{color:var(--danger);}
+
+/* quiz */
+details.q{background:var(--panel2);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;margin-bottom:8px;}
+details.q summary{cursor:pointer;font-weight:600;color:var(--text);}
+details.q .ans{margin-top:8px;color:var(--muted);font-size:13px;}
+.mcq{margin:14px 0;padding:12px;background:var(--panel2);border:1px solid var(--border2);border-radius:8px;}
+.mcq p{margin:0 0 8px;font-weight:600;}
+.mcq .opts button{display:block;width:100%;text-align:left;background:var(--panel);border:1px solid var(--border2);color:var(--text);padding:8px 10px;border-radius:6px;margin-bottom:6px;cursor:pointer;font-size:13px;}
+.mcq .opts button:hover{border-color:var(--accent);}
+.mcq .opts button.correct{border-color:var(--ok);background:#0b2318;color:var(--ok);}
+.mcq .opts button.wrong{border-color:var(--danger);background:#2b0d10;color:var(--danger);}
+.mcq .exp{margin-top:6px;font-size:12.5px;color:var(--muted);display:none;}
+
+table.cmp{width:100%;border-collapse:collapse;font-size:12.5px;}
+table.cmp th,table.cmp td{border:1px solid var(--border2);padding:8px 10px;text-align:left;}
+table.cmp th{background:var(--panel2);color:var(--accent);font-family:'Space Grotesk',sans-serif;}
+table.cmp td.mono{font-family:'JetBrains Mono',monospace;}
+.note{border-left:3px solid var(--accent);padding:8px 12px;background:var(--panel2);border-radius:0 6px 6px 0;font-size:12.5px;color:var(--muted);margin:10px 0;}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <h1>&#9635; FreeRTOS Heap Lab</h1>
+  <div class="sub">Interactive simulator for heap_1 &rarr; heap_4 &middot; predict, break things, watch the free list mutate byte by byte.</div>
+  <nav class="tabs">
+    <button data-tab="found" class="active">Foundations</button>
+    <button data-tab="h1">heap_1</button>
+    <button data-tab="h2">heap_2</button>
+    <button data-tab="h3">heap_3</button>
+    <button data-tab="h4">heap_4</button>
+    <button data-tab="cmp">Compare</button>
+    <button data-tab="quiz">Quiz</button>
+  </nav>
+</header>
+
+<main>
+
+<!-- ================= FOUNDATIONS ================= -->
+<section class="tabpanel active" data-panel="found">
+  <div class="card">
+    <h3>Why an RTOS needs a heap</h3>
+    <ul class="bullets">
+      <li>Tasks, queues, semaphores, timers created with <code>xTaskCreate</code> etc. need RAM for their TCB + stack. That RAM has to come from somewhere &mdash; a heap is just "somewhere with bookkeeping."</li>
+      <li>Unlike desktop OSes, there's no MMU/paging safety net on most MCUs. A bad allocator can silently corrupt the whole system &mdash; determinism and overhead matter more than on Linux.</li>
+      <li>FreeRTOS ships <b>five interchangeable heap files</b> (heap_1..5) &mdash; you pick one by adding it to your build. Same API (<code>pvPortMalloc</code>/<code>vPortFree</code>), wildly different internals.</li>
+    </ul>
+  </div>
+  <div class="card">
+    <h3>Fragmentation, in one picture</h3>
+    <div class="grid2">
+      <div>
+        <p><b>Internal fragmentation</b>: wasted space <i>inside</i> a block you already own (alignment padding, or an allocator that hands you more than you asked for).</p>
+        <p><b>External fragmentation</b>: wasted space <i>between</i> blocks &mdash; plenty of total free memory, but no single hole big enough. This is the one that kills long-running embedded systems.</p>
+      </div>
+      <div>
+        <div class="controls">
+          <label>Try an allocation size <input type="number" id="align-demo-size" value="20" min="1"></label>
+          <label>Alignment <input type="number" id="align-demo-al" value="8" min="1" style="width:50px"></label>
+        </div>
+        <div class="heapbar-wrap"><div class="heapbar" id="align-demo-bar" style="width:100%"></div></div>
+        <div class="heap-legend">
+          <span><span class="swatch" style="background:var(--header)"></span>header (metadata)</span>
+          <span><span class="swatch" style="background:var(--alloc)"></span>your data</span>
+          <span><span class="swatch" style="background:repeating-linear-gradient(45deg,#7a5324 0 3px,#e8973d 3px 6px)"></span>alignment padding</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>The vocabulary you'll use in every lab below</h3>
+    <ul class="bullets">
+      <li><b>Metadata / header</b>: a small struct FreeRTOS hides just before every block (size, and for free blocks a <code>next</code> pointer). It's <i>overhead</i> you pay per allocation.</li>
+      <li><b>Free list</b>: a linked list threading together every free block. Allocation = search this list. Free = insert into this list.</li>
+      <li><b>Splitting</b>: found a free block bigger than you need? Chop it &mdash; carve out exactly what's needed, leave the remainder as a smaller free block.</li>
+      <li><b>Coalescing</b>: when a block is freed, merge it with a physically adjacent free neighbor so two small holes become one big one. This is the single biggest lever against external fragmentation.</li>
+      <li><b>Deterministic</b>: allocation takes bounded, predictable time regardless of heap state &mdash; critical for hard real-time. Any list scan (best-fit, first-fit) is technically O(n) and <i>not</i> strictly deterministic; a bump allocator (heap_1) is O(1) and is.</li>
+    </ul>
+    <div class="note">Keep this tab open mentally &mdash; every lab below will refer back to these five words. Now go break heap_1.</div>
+  </div>
+</section>
+
+<!-- ================= HEAP1 ================= -->
+<section class="tabpanel" data-panel="h1">
+  <div class="grid2">
+    <div>
+      <div class="card">
+        <h3>Design philosophy</h3>
+        <p>The dumbest possible allocator: a bump pointer. Every <code>pvPortMalloc</code> carves the next slice off the top of a static array and moves the pointer forward. <b>There is no <code>vPortFree</code>.</b> Calling it compiles, but does nothing.</p>
+        <ul class="bullets">
+          <li>Zero free list, zero metadata search &rarr; O(1), fully deterministic.</li>
+          <li>Zero fragmentation risk, because nothing is ever freed or reused.</li>
+          <li>Smallest code size of all five heaps.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>When to use it for real</h3>
+        <p>Systems that create all tasks/queues/semaphores <b>once at startup</b> and never delete them &mdash; the vast majority of small embedded products. If you never call <code>vTaskDelete</code>, heap_1 is often the <i>correct</i> choice, not a limitation.</p>
+      </div>
+      <div class="card">
+        <h3>Interview traps</h3>
+        <ul class="bullets">
+          <li>"Does heap_1 leak memory?" &mdash; no, leaking implies you lost a valid pointer. Here memory is intentionally permanent.</li>
+          <li>"Is heap_1 thread-safe?" &mdash; the bump pointer update should still happen inside a critical section against concurrent task/ISR allocation.</li>
+        </ul>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="controls">
+          <label>Heap size (B) <input type="range" id="h1-total" min="64" max="512" step="16" value="192"><span id="h1-total-val" class="mono">192</span></label>
+          <button class="btn" id="h1-reset">Reset heap</button>
+          <button class="btn" id="h1-fragdemo">Run out of memory</button>
+        </div>
+        <div class="controls">
+          <label>alloc size <input type="number" id="h1-size" value="32" min="1"></label>
+          <button class="btn primary" id="h1-alloc">pvPortMalloc()</button>
+          <button class="btn danger" id="h1-free-attempt">vPortFree() &mdash; try it</button>
+          <label class="toggle"><input type="checkbox" id="h1-predict" checked> predict first</label>
+        </div>
+        <div class="heapbar-wrap"><div class="heapbar" id="h1-bar"></div></div>
+        <div class="heap-legend">
+          <span><span class="swatch" style="background:var(--header)"></span>header</span>
+          <span><span class="swatch" style="background:var(--alloc)"></span>allocated</span>
+          <span><span class="swatch" style="background:var(--free)"></span>never touched</span>
+        </div>
+        <div class="stats" id="h1-stats"></div>
+        <div id="h1-predictbox"></div>
+        <h3 style="margin-top:12px">Allocated blocks (permanent)</h3>
+        <div class="chips" id="h1-chips"></div>
+        <h3>Log</h3>
+        <div class="log" id="h1-log"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HEAP2 ================= -->
+<section class="tabpanel" data-panel="h2">
+  <div class="grid2">
+    <div>
+      <div class="card">
+        <h3>Design philosophy</h3>
+        <p>Adds a real free list on top of heap_1's idea: <code>vPortFree</code> now works. Allocation uses <b>best-fit</b> &mdash; it scans the <i>entire</i> free list and picks the smallest block that's still big enough, to minimize leftover slack.</p>
+        <p><b>The catch: freed blocks are never merged with physically adjacent free neighbors.</b> Two 32B holes sitting right next to each other stay two 32B holes forever &mdash; even though together they could satisfy a 60B request.</p>
+      </div>
+      <div class="card">
+        <h3>Advantages / disadvantages</h3>
+        <ul class="bullets">
+          <li>+ Supports free(), better slack control than a naive first-fit.</li>
+          <li>&minus; O(n) search every allocation &mdash; not great for hard real-time.</li>
+          <li>&minus; No coalescing &rarr; heavy external fragmentation on long-running alloc/free churn.</li>
+          <li>FreeRTOS docs explicitly say: superseded by heap_4, don't use for new designs.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>When to use it for real</h3>
+        <p>Rare today. Maybe: allocations are always near-uniform size (so best-fit slack is naturally tiny and adjacency never matters), and you specifically don't want the extra coalescing code/time cost of heap_4. In practice: just use heap_4.</p>
+      </div>
+    </div>
+    <div id="lab-h2">
+      <div class="card">
+        <div class="controls">
+          <label>Heap size (B) <input type="range" class="total" min="128" max="512" step="16" value="256"><span class="totalval mono">256</span></label>
+          <button class="btn reset">Reset heap</button>
+          <button class="btn fragdemo">Run fragmentation demo</button>
+        </div>
+        <div class="controls">
+          <label>alloc size <input type="number" class="asize" value="32" min="1"></label>
+          <button class="btn primary alloc">pvPortMalloc()</button>
+          <label class="toggle"><input type="checkbox" class="predict" checked> predict first</label>
+        </div>
+        <div class="heapbar-wrap"><div class="heapbar bar"></div></div>
+        <div class="heap-legend">
+          <span><span class="swatch" style="background:var(--header)"></span>header</span>
+          <span><span class="swatch" style="background:var(--alloc)"></span>allocated</span>
+          <span><span class="swatch" style="background:var(--free)"></span>free</span>
+          <span><span class="swatch" style="background:repeating-linear-gradient(45deg,#7a5324 0 3px,#e8973d 3px 6px)"></span>internal frag slack</span>
+        </div>
+        <div class="stats stats-box"></div>
+        <div class="predictbox"></div>
+        <h3 style="margin-top:12px">Free list (best-fit scans all of it)</h3>
+        <div class="freelist flist"></div>
+        <h3>Allocated blocks &mdash; click &times; to free</h3>
+        <div class="chips chipbox"></div>
+        <h3>Log</h3>
+        <div class="log logbox"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HEAP3 ================= -->
+<section class="tabpanel" data-panel="h3">
+  <div class="grid2">
+    <div>
+      <div class="card">
+        <h3>Design philosophy</h3>
+        <p>heap_3 isn't really a FreeRTOS allocator at all &mdash; it's a thin, thread-safe <b>wrapper around the standard C library's <code>malloc()</code>/<code>free()</code></b>. FreeRTOS just suspends the scheduler (or wraps a critical section) around the call so a context switch can't interrupt libc's internal bookkeeping.</p>
+      </div>
+      <div class="card">
+        <h3>Advantages / disadvantages</h3>
+        <ul class="bullets">
+          <li>+ Reuses a mature, battle-tested allocator &mdash; often first-fit-with-coalescing like heap_4, but the <i>exact</i> algorithm is whatever your toolchain ships (newlib, picolibc, dlmalloc&hellip;).</li>
+          <li>+ Heap size isn't fixed by <code>configTOTAL_HEAP_SIZE</code> &mdash; it's whatever the linker/compiler gives the C runtime.</li>
+          <li>&minus; Not deterministic and typically slower &mdash; you inherit libc's worst case, not FreeRTOS's.</li>
+          <li>&minus; Bigger code size (you link the whole libc allocator).</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>When to use it for real</h3>
+        <p>Porting desktop/POSIX-ish code to an RTOS quickly, or a platform (Linux-based RTOS shim, simulator build) where libc malloc is already required elsewhere.</p>
+        <div class="note">This lab models heap_3's behavior as first-fit + coalescing (a common real allocator shape) purely so you can compare its <i>fragmentation story</i> to heap_4 &mdash; treat the exact search order as illustrative, since real libc internals vary.</div>
+      </div>
+    </div>
+    <div id="lab-h3">
+      <div class="card">
+        <div class="controls">
+          <label>"Heap" size (B) <input type="range" class="total" min="128" max="512" step="16" value="256"><span class="totalval mono">256</span></label>
+          <button class="btn reset">Reset heap</button>
+          <button class="btn fragdemo">Run fragmentation demo</button>
+        </div>
+        <div class="controls">
+          <label>alloc size <input type="number" class="asize" value="32" min="1"></label>
+          <button class="btn primary alloc">malloc()</button>
+          <label class="toggle"><input type="checkbox" class="predict" checked> predict first</label>
+        </div>
+        <div class="heapbar-wrap"><div class="heapbar bar"></div></div>
+        <div class="heap-legend">
+          <span><span class="swatch" style="background:var(--header)"></span>header</span>
+          <span><span class="swatch" style="background:var(--alloc)"></span>allocated</span>
+          <span><span class="swatch" style="background:var(--free)"></span>free</span>
+        </div>
+        <div class="stats stats-box"></div>
+        <div class="predictbox"></div>
+        <h3 style="margin-top:12px">Free list (address order, first-fit)</h3>
+        <div class="freelist flist"></div>
+        <h3>Allocated blocks &mdash; click &times; to free</h3>
+        <div class="chips chipbox"></div>
+        <h3>Log</h3>
+        <div class="log logbox"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= HEAP4 ================= -->
+<section class="tabpanel" data-panel="h4">
+  <div class="grid2">
+    <div>
+      <div class="card">
+        <h3>Design philosophy</h3>
+        <p>FreeRTOS's own general-purpose allocator, and the default recommendation. Free blocks are kept in <b>address order</b>. Allocation is <b>first-fit</b>: walk the list, take the first block big enough. On free(), the block checks its immediate neighbors in the list &mdash; if either is free <i>and physically adjacent</i>, merge.</p>
+      </div>
+      <div class="card">
+        <h3>Advantages / disadvantages</h3>
+        <ul class="bullets">
+          <li>+ Coalescing keeps holes big, dramatically reducing external fragmentation vs heap_2.</li>
+          <li>+ First-fit is cheaper per-search than best-fit's exhaustive scan.</li>
+          <li>+ Exposes <code>xPortGetFreeHeapSize()</code> / <code>xPortGetMinimumEverFreeHeapSize()</code> for live diagnostics (only heap_4/5).</li>
+          <li>&minus; Still O(n) worst case &rarr; not hard-real-time deterministic.</li>
+          <li>&minus; First-fit can still eat into a big block for a tiny request (compare with the demo below).</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>When to use it for real</h3>
+        <p>Default choice for anything that creates and deletes tasks/queues dynamically at runtime. If in doubt in an interview: <b>heap_4</b>.</p>
+      </div>
+      <div class="card">
+        <h3>vs heap_2</h3>
+        <p>Same "has a free list" idea, but heap_4 trades best-fit's exhaustive search for first-fit's speed, and spends that budget on coalescing instead &mdash; which matters far more for long-run fragmentation than picking the mathematically tightest hole.</p>
+      </div>
+    </div>
+    <div id="lab-h4">
+      <div class="card">
+        <div class="controls">
+          <label>Heap size (B) <input type="range" class="total" min="128" max="512" step="16" value="256"><span class="totalval mono">256</span></label>
+          <button class="btn reset">Reset heap</button>
+          <button class="btn fragdemo">Run fragmentation demo</button>
+        </div>
+        <div class="controls">
+          <label>alloc size <input type="number" class="asize" value="32" min="1"></label>
+          <button class="btn primary alloc">pvPortMalloc()</button>
+          <label class="toggle"><input type="checkbox" class="predict" checked> predict first</label>
+        </div>
+        <div class="heapbar-wrap"><div class="heapbar bar"></div></div>
+        <div class="heap-legend">
+          <span><span class="swatch" style="background:var(--header)"></span>header</span>
+          <span><span class="swatch" style="background:var(--alloc)"></span>allocated</span>
+          <span><span class="swatch" style="background:var(--free)"></span>free</span>
+        </div>
+        <div class="stats stats-box"></div>
+        <div class="predictbox"></div>
+        <h3 style="margin-top:12px">Free list (address order, first-fit + coalesce)</h3>
+        <div class="freelist flist"></div>
+        <h3>Allocated blocks &mdash; click &times; to free</h3>
+        <div class="chips chipbox"></div>
+        <h3>Log</h3>
+        <div class="log logbox"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ================= COMPARE ================= -->
+<section class="tabpanel" data-panel="cmp">
+  <div class="card">
+    <h3>Side-by-side</h3>
+    <table class="cmp">
+      <tr><th></th><th>heap_1</th><th>heap_2</th><th>heap_3</th><th>heap_4</th></tr>
+      <tr><td>free() supported</td><td class="mono">no</td><td class="mono">yes</td><td class="mono">yes</td><td class="mono">yes</td></tr>
+      <tr><td>Algorithm</td><td class="mono">bump pointer</td><td class="mono">best-fit</td><td class="mono">libc-defined</td><td class="mono">first-fit</td></tr>
+      <tr><td>Coalescing</td><td class="mono">n/a</td><td class="mono">no</td><td class="mono">usually yes</td><td class="mono">yes</td></tr>
+      <tr><td>Search complexity</td><td class="mono">O(1)</td><td class="mono">O(n)</td><td class="mono">libc-defined</td><td class="mono">O(n)</td></tr>
+      <tr><td>Deterministic</td><td class="mono">yes</td><td class="mono">no</td><td class="mono">no</td><td class="mono">no</td></tr>
+      <tr><td>Heap bound by configTOTAL_HEAP_SIZE</td><td class="mono">yes</td><td class="mono">yes</td><td class="mono">no</td><td class="mono">yes</td></tr>
+      <tr><td>Thread safety mechanism</td><td class="mono">critical section</td><td class="mono">critical section</td><td class="mono">suspend scheduler</td><td class="mono">critical section</td></tr>
+      <tr><td>Heap stats API</td><td class="mono">&mdash;</td><td class="mono">&mdash;</td><td class="mono">&mdash;</td><td class="mono">xPortGetFreeHeapSize etc.</td></tr>
+      <tr><td>Typical use</td><td class="mono">static systems</td><td class="mono">legacy, avoid</td><td class="mono">porting/simulator</td><td class="mono">default choice</td></tr>
+    </table>
+    <div class="note">Bonus (not covered in labs): <b>heap_5</b> = heap_4's algorithm, but spans several non-contiguous memory regions via <code>vPortDefineHeapRegions()</code> &mdash; useful when your MCU has RAM in disjoint physical blocks.</div>
+  </div>
+</section>
+
+<!-- ================= QUIZ ================= -->
+<section class="tabpanel" data-panel="quiz">
+  <div class="card">
+    <h3>Predict-the-outcome challenges</h3>
+    <div id="quiz-mcqs"></div>
+  </div>
+  <div class="card">
+    <h3>Interview questions &mdash; click to reveal</h3>
+    <div id="quiz-details"></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+/* ===================== tab switching ===================== */
+document.querySelectorAll('nav.tabs button').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    document.querySelectorAll('nav.tabs button').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('section.tabpanel').forEach(p=>p.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelector(`section[data-panel="${btn.dataset.tab}"]`).classList.add('active');
+  });
+});
+
+/* ===================== core sim ===================== */
+const HEADER = 8;
+function align(n,a){return Math.ceil(n/a)*a;}
+
+class HeapSim{
+  constructor(kind,total,alignment=8){
+    this.kind=kind; this.alignment=alignment; this.header=HEADER;
+    this.reset(total);
+  }
+  reset(total){
+    this.total=total;
+    this.idCounter=1;
+    if(this.kind==='heap1'){
+      this.alloced=[]; this.nextFree=0;
+    } else {
+      this.blocks=[{start:0,size:total,free:true,id:null,userSize:null}];
+    }
+  }
+  minSplit(){return this.header+this.alignment;}
+
+  // --- heap1 bump ---
+  preview1(reqSize){
+    const size=align(reqSize,this.alignment); const need=size+this.header;
+    const fits = this.nextFree+need<=this.total;
+    return {size,need,fits,remaining:this.total-this.nextFree};
+  }
+  alloc1(reqSize){
+    const p=this.preview1(reqSize); const log=[];
+    log.push(`request ${reqSize}B -> aligned ${p.size}B + ${this.header}B header = ${p.need}B`);
+    if(!p.fits){
+      log.push({t:'fail',m:`bump pointer @${this.nextFree}, only ${p.remaining}B left of ${this.total}B total. FAIL: out of memory (heap_1 never reclaims).`});
+      return {ok:false,log};
+    }
+    const start=this.nextFree;
+    const blk={start,size:p.need,userSize:reqSize,id:this.idCounter++};
+    this.alloced.push(blk);
+    this.nextFree+=p.need;
+    log.push(`allocated block #${blk.id} @${start}, size ${p.need}B (bump pointer now @${this.nextFree})`);
+    return {ok:true,log,blk};
+  }
+
+  // --- generic best-fit(heap2) / first-fit(heap3/4) ---
+  freeBlocksAddrOrder(){return this.blocks.filter(b=>b.free);}
+  preview(reqSize){
+    const size=align(reqSize,this.alignment); const need=size+this.header;
+    const cands=this.freeBlocksAddrOrder().filter(b=>b.size>=need);
+    let chosen=null;
+    if(cands.length){
+      chosen = this.kind==='heap2' ? cands.reduce((best,c)=>(!best||c.size<best.size)?c:best,null) : cands[0];
+    }
+    return {size,need,candidates:this.freeBlocksAddrOrder(),chosen,fits:!!chosen,
+      algo: this.kind==='heap2'?'best-fit (smallest block that still fits)':'first-fit (first block that fits, in address order)'};
+  }
+  alloc(reqSize){
+    const p=this.preview(reqSize); const log=[];
+    log.push(`request ${reqSize}B -> aligned ${p.size}B + ${this.header}B header = ${p.need}B needed`);
+    log.push(`scanning free list (${p.algo})...`);
+    if(!p.chosen){
+      log.push({t:'fail',m:`no free block >= ${p.need}B found. FAIL: out of memory (even though total free may be larger — external fragmentation).`});
+      return {ok:false,log,preview:p};
+    }
+    const idx=this.blocks.indexOf(p.chosen);
+    const remainder = p.chosen.size - p.need;
+    const allocBlk = {start:p.chosen.start, id:this.idCounter++, free:false, userSize:reqSize};
+    let newBlocks;
+    if(remainder > this.minSplit()){
+      allocBlk.size = p.need;
+      const freeRem = {start:p.chosen.start+p.need, size:remainder, free:true, id:null, userSize:null};
+      newBlocks=[allocBlk,freeRem];
+      log.push(`chose free block @${p.chosen.start} (${p.chosen.size}B) -> SPLIT into alloc(${p.need}B) + free(${remainder}B)`);
+    } else {
+      allocBlk.size = p.chosen.size;
+      newBlocks=[allocBlk];
+      const slack=p.chosen.size-p.need;
+      log.push(`chose free block @${p.chosen.start} (${p.chosen.size}B) -> remainder too small to split (${remainder}B < ${this.minSplit()}B min), whole block used${slack>0?`, ${slack}B internal fragmentation`:''}`);
+    }
+    this.blocks.splice(idx,1,...newBlocks);
+    log.push(`block #${allocBlk.id} ready @${allocBlk.start}, ${allocBlk.size}B total (${reqSize}B usable)`);
+    return {ok:true,log,blk:allocBlk,preview:p};
+  }
+  free(id){
+    const log=[];
+    if(this.kind==='heap1'){
+      log.push({t:'fail',m:`heap_1 has no vPortFree() implementation. Block #${id} stays allocated forever — that's the whole design.`});
+      return {ok:false,log};
+    }
+    const idx=this.blocks.findIndex(b=>b.id===id);
+    if(idx<0){log.push({t:'fail',m:'block not found'});return {ok:false,log};}
+    const blk=this.blocks[idx];
+    log.push(`freeing block #${id} @${blk.start} (${blk.size}B)`);
+    blk.free=true; blk.id=null; blk.userSize=null;
+    let mergedLeft=false, mergedRight=false;
+    if(this.kind!=='heap2'){
+      if(idx+1<this.blocks.length && this.blocks[idx+1].free){
+        const nb=this.blocks[idx+1];
+        blk.size+=nb.size; this.blocks.splice(idx+1,1); mergedRight=true;
+      }
+      if(idx-1>=0 && this.blocks[idx-1].free){
+        const pb=this.blocks[idx-1];
+        pb.size+=blk.size; this.blocks.splice(idx,1); mergedLeft=true;
+      }
+    } else {
+      log.push({t:'warn',m:'heap_2 does NOT coalesce — even if a neighbor is free, this block stays separate.'});
+    }
+    if(mergedLeft||mergedRight) log.push({t:'ok',m:`coalesced with ${mergedLeft&&mergedRight?'both neighbors':mergedLeft?'left neighbor':'right neighbor'} -> bigger free block`});
+    return {ok:true,log,mergedLeft,mergedRight};
+  }
+  stats(){
+    if(this.kind==='heap1'){
+      const used=this.nextFree, free=this.total-used;
+      return {used,free,largest:free,blocks:this.alloced.length,frag:0};
+    }
+    const freeBlocks=this.blocks.filter(b=>b.free);
+    const free=freeBlocks.reduce((s,b)=>s+b.size,0);
+    const largest=freeBlocks.reduce((m,b)=>Math.max(m,b.size),0);
+    const used=this.total-free;
+    const frag = free>0 ? (1-largest/free) : 0;
+    return {used,free,largest,blocks:freeBlocks.length,frag};
+  }
+}
+
+/* ===================== rendering ===================== */
+function renderBar(container,sim,opts={}){
+  container.innerHTML='';
+  const blocks = sim.kind==='heap1'
+    ? [...sim.alloced.map(b=>({...b,free:false})), ...(sim.nextFree<sim.total?[{start:sim.nextFree,size:sim.total-sim.nextFree,free:true,id:null}]:[])]
+    : sim.blocks;
+  blocks.forEach(b=>{
+    const d=document.createElement('div');
+    d.className='blk '+(b.free?'free':'alloc');
+    d.style.width=(b.size/sim.total*100)+'%';
+    if(opts.scanIds && opts.scanIds.includes(b.start)) d.classList.add('scanning');
+    if(opts.chosenStart===b.start) d.classList.add('chosen');
+    if(!b.free){
+      const hseg=document.createElement('div'); hseg.className='hdrseg';
+      hseg.style.width=Math.min(30,sim.header/b.size*100)+'%';
+      d.appendChild(hseg);
+      const used = align(b.userSize,sim.alignment)+sim.header;
+      const slack = b.size-used;
+      if(slack>0){
+        const sseg=document.createElement('div'); sseg.className='slackseg';
+        sseg.style.width=(slack/b.size*100)+'%';
+        d.appendChild(sseg);
+      }
+      d.title=`ALLOCATED #${b.id}\naddr ${b.start}\nblock size ${b.size}B\nuser requested ${b.userSize}B\naligned ${align(b.userSize,sim.alignment)}B + ${sim.header}B header${slack>0?`\ninternal frag ${slack}B`:''}`;
+    } else {
+      d.title=`FREE\naddr ${b.start}\nsize ${b.size}B`;
+    }
+    if(b.size/sim.total>0.06) d.textContent=b.size+'B';
+    container.appendChild(d);
+  });
+}
+function renderFreeList(container,sim,opts={}){
+  container.innerHTML='';
+  if(sim.kind==='heap1'){container.innerHTML='<span class="flempty">heap_1 keeps no free list — just one bump pointer.</span>';return;}
+  const fb=sim.freeBlocksAddrOrder();
+  if(!fb.length){container.innerHTML='<span class="flempty">free list is empty</span>';return;}
+  fb.forEach((b,i)=>{
+    const n=document.createElement('div'); n.className='flnode';
+    if(opts.scanIds && opts.scanIds.includes(b.start)) n.classList.add('scanning');
+    if(opts.chosenStart===b.start) n.classList.add('chosen');
+    n.textContent=`@${b.start} · ${b.size}B`;
+    container.appendChild(n);
+    if(i<fb.length-1){const a=document.createElement('span');a.className='flarrow';a.textContent='→';container.appendChild(a);}
+  });
+}
+function renderStats(container,sim){
+  const s=sim.stats();
+  container.innerHTML=`
+    <span><span class="k">total</span> <b>${sim.total}B</b></span>
+    <span><span class="k">used</span> <b>${s.used}B</b></span>
+    <span><span class="k">free</span> <b>${s.free}B</b></span>
+    <span><span class="k">largest free block</span> <b>${s.largest}B</b></span>
+    <span><span class="k">free blocks</span> <b>${s.blocks}</b></span>
+    <span><span class="k">fragmentation index</span> <b>${(s.frag*100).toFixed(0)}%</b></span>`;
+}
+function renderChips(container,sim,onFree){
+  container.innerHTML='';
+  const list = sim.kind==='heap1' ? sim.alloced : sim.blocks.filter(b=>!b.free);
+  if(!list.length){container.innerHTML='<span class="flempty">nothing allocated</span>';return;}
+  list.forEach(b=>{
+    const c=document.createElement('div'); c.className='chip';
+    c.innerHTML=`#${b.id}: ${b.userSize}B`;
+    const x=document.createElement('button'); x.textContent='✕';
+    x.onclick=()=>onFree(b.id);
+    c.appendChild(x);
+    container.appendChild(c);
+  });
+}
+function pushLog(container,entries){
+  entries.forEach(e=>{
+    const line=document.createElement('div');
+    if(typeof e==='string'){line.textContent='› '+e;}
+    else {line.textContent='› '+e.m; if(e.t==='fail')line.className='fail'; if(e.t==='warn')line.className='warn'; if(e.t==='ok')line.className='ok';}
+    container.appendChild(line);
+  });
+  container.scrollTop=container.scrollHeight;
+}
+
+/* ===================== lab wiring ===================== */
+function buildLab(root,kind,initialTotal){
+  const sim=new HeapSim(kind,initialTotal);
+  const bar=root.querySelector('.bar');
+  const flist=root.querySelector('.flist');
+  const statsBox=root.querySelector('.stats-box');
+  const chipbox=root.querySelector('.chipbox');
+  const logbox=root.querySelector('.logbox');
+  const predictbox=root.querySelector('.predictbox');
+  const asize=root.querySelector('.asize');
+  const totalSlider=root.querySelector('.total');
+  const totalVal=root.querySelector('.totalval');
+  const predictToggle=root.querySelector('.predict');
+
+  function redraw(opts){
+    renderBar(bar,sim,opts||{});
+    renderFreeList(flist,sim,opts||{});
+    renderStats(statsBox,sim);
+    renderChips(chipbox,sim,doFree);
+  }
+  function doFreeImmediate(id){
+    const r=sim.free(id);
+    pushLog(logbox,r.log);
+    redraw();
+  }
+  function doFree(id){
+    if(!predictToggle.checked){doFreeImmediate(id);return;}
+    const blk=sim.blocks.find(b=>b.id===id);
+    const idx=sim.blocks.indexOf(blk);
+    const leftFree = idx-1>=0 && sim.blocks[idx-1].free;
+    const rightFree = idx+1<sim.blocks.length && sim.blocks[idx+1].free;
+    if(kind==='heap2' || (!leftFree && !rightFree)){ doFreeImmediate(id); return; }
+    const opts=[
+      {label:'Merges with left neighbor only',ok:leftFree&&!rightFree},
+      {label:'Merges with right neighbor only',ok:rightFree&&!leftFree},
+      {label:'Merges with both neighbors',ok:leftFree&&rightFree},
+      {label:'Does not merge',ok:!leftFree&&!rightFree},
+    ];
+    showPredict(predictbox,`Freeing block #${id} — what happens to its neighbors?`,opts,()=>{doFreeImmediate(id);});
+  }
+  function doAlloc(){
+    const reqSize=Math.max(1,parseInt(asize.value)||1);
+    if(kind==='heap1'){
+      if(!predictToggle.checked){ const r=sim.alloc1(reqSize); pushLog(logbox,r.log); redraw(); return; }
+      const p=sim.preview1(reqSize);
+      const opts=[{label:`Succeeds (${p.remaining}B left of headroom)`,ok:p.fits},{label:'Fails — out of memory',ok:!p.fits}];
+      showPredict(predictbox,`Requesting ${reqSize}B (needs ${p.need}B incl. header). Bump pointer @${sim.nextFree}, ${p.remaining}B left.`,opts,()=>{
+        const r=sim.alloc1(reqSize); pushLog(logbox,r.log); redraw();
+      });
+      return;
+    }
+    const p=sim.preview(reqSize);
+    if(!predictToggle.checked){ const r=sim.alloc(reqSize); pushLog(logbox,r.log); redraw({chosenStart:r.ok?r.blk.start:null}); return; }
+    const opts=p.candidates.map(c=>({label:`@${c.start} (${c.size}B)`,ok:p.chosen&&c.start===p.chosen.start}));
+    opts.push({label:'Allocation fails — no block big enough',ok:!p.chosen});
+    redraw({scanIds:p.candidates.map(c=>c.start)});
+    showPredict(predictbox,`Requesting ${reqSize}B (needs ${p.need}B incl. header). Algorithm: ${p.algo}. Which free block gets chosen?`,opts,()=>{
+      const r=sim.alloc(reqSize); pushLog(logbox,r.log); redraw({chosenStart:r.ok?r.blk.start:null});
+    });
+  }
+  function reset(){sim.reset(parseInt(totalSlider.value)); logbox.innerHTML=''; predictbox.innerHTML=''; redraw();}
+  function fragDemo(){
+    sim.reset(160); totalSlider.value=160; totalVal.textContent='160';
+    logbox.innerHTML=''; predictbox.innerHTML='';
+    pushLog(logbox,[{t:'warn',m:'demo heap fixed to 160B so it fills exactly — 4 x 32B allocations.'}]);
+    const seq=[32,32,32,32];
+    seq.forEach(s=>{const r=sim.alloc(s); pushLog(logbox,[`[demo] alloc(${s}) -> `+(r.ok?`@${r.blk.start}`:'FAIL')]);});
+    redraw();
+    const ids=sim.blocks.filter(b=>!b.free).map(b=>b.id);
+    // free the two middle (physically adjacent) blocks
+    const midIds=[ids[1],ids[2]];
+    midIds.forEach(id=>{const r=sim.free(id); pushLog(logbox,[`[demo] free(#${id})`,...r.log]);});
+    redraw();
+    pushLog(logbox,[{t:'warn',m:'now requesting 50B — needs a hole of 58B. Watch what each allocator does with the two adjacent 32B blocks you just freed.'}]);
+    setTimeout(()=>{
+      const r=sim.alloc(50);
+      pushLog(logbox,[`[demo] alloc(50) -> `+(r.ok?`SUCCESS @${r.blk.start}`:'FAIL — external fragmentation!')]);
+      redraw({chosenStart:r.ok?r.blk.start:null});
+    },400);
+  }
+  root.querySelector('.alloc').addEventListener('click',doAlloc);
+  root.querySelector('.reset').addEventListener('click',reset);
+  root.querySelector('.fragdemo').addEventListener('click',fragDemo);
+  totalSlider.addEventListener('input',()=>{totalVal.textContent=totalSlider.value;});
+  totalSlider.addEventListener('change',reset);
+  redraw();
+  return sim;
+}
+
+function showPredict(box,question,options,onReveal){
+  box.innerHTML='';
+  const wrap=document.createElement('div'); wrap.className='predict';
+  const h=document.createElement('h4'); h.textContent='Predict before you run it';
+  const q=document.createElement('div'); q.textContent=question; q.style.marginBottom='10px';
+  const opts=document.createElement('div'); opts.className='opts';
+  let answered=false;
+  options.forEach(o=>{
+    const b=document.createElement('button');
+    b.textContent=o.label;
+    b.onclick=()=>{
+      if(answered)return; answered=true;
+      [...opts.children].forEach(c=>c.disabled=true);
+      b.classList.add(o.ok?'correct':'wrong');
+      if(!o.ok){ options.forEach((oo,i)=>{if(oo.ok) opts.children[i].classList.add('correct');}); }
+      const verdict=document.createElement('div');
+      verdict.className='verdict '+(o.ok?'ok':'bad');
+      verdict.textContent=o.ok?'✓ Correct — running it now.':'✗ Not quite — here\'s what actually happens.';
+      wrap.appendChild(verdict);
+      setTimeout(()=>{onReveal(); box.innerHTML='';},650);
+    };
+    opts.appendChild(b);
+  });
+  wrap.appendChild(h); wrap.appendChild(q); wrap.appendChild(opts);
+  box.appendChild(wrap);
+}
+
+/* heap1 lab (bespoke, simpler) */
+function buildH1(){
+  const sim=new HeapSim('heap1',192);
+  const bar=document.getElementById('h1-bar');
+  const totalSlider=document.getElementById('h1-total');
+  const totalVal=document.getElementById('h1-total-val');
+  const statsBox=document.getElementById('h1-stats');
+  const chipbox=document.getElementById('h1-chips');
+  const logbox=document.getElementById('h1-log');
+  const predictbox=document.getElementById('h1-predictbox');
+  const sizeInput=document.getElementById('h1-size');
+  const predictToggle=document.getElementById('h1-predict');
+
+  function redraw(){renderBar(bar,sim,{}); renderStats(statsBox,sim); renderChips(chipbox,sim,()=>{});}
+  function doAlloc(){
+    const reqSize=Math.max(1,parseInt(sizeInput.value)||1);
+    if(!predictToggle.checked){const r=sim.alloc1(reqSize); pushLog(logbox,r.log); redraw(); return;}
+    const p=sim.preview1(reqSize);
+    const opts=[{label:`Succeeds (${p.remaining}B headroom left)`,ok:p.fits},{label:'Fails — out of memory',ok:!p.fits}];
+    showPredict(predictbox,`Requesting ${reqSize}B (needs ${p.need}B incl. header). Bump pointer @${sim.nextFree}, ${p.remaining}B left of ${sim.total}B.`,opts,()=>{
+      const r=sim.alloc1(reqSize); pushLog(logbox,r.log); redraw();
+    });
+  }
+  document.getElementById('h1-alloc').addEventListener('click',doAlloc);
+  document.getElementById('h1-free-attempt').addEventListener('click',()=>{
+    const r=sim.free(sim.alloced.length?sim.alloced[0].id:-1);
+    pushLog(logbox,r.log);
+  });
+  document.getElementById('h1-reset').addEventListener('click',()=>{sim.reset(parseInt(totalSlider.value)); logbox.innerHTML=''; predictbox.innerHTML=''; redraw();});
+  document.getElementById('h1-fragdemo').addEventListener('click',()=>{
+    sim.reset(parseInt(totalSlider.value)); logbox.innerHTML='';
+    let r={ok:true};
+    while(r.ok){ r=sim.alloc1(24); pushLog(logbox,r.log.map(l=>typeof l==='string'?`[demo] `+l:l)); }
+    redraw();
+  });
+  totalSlider.addEventListener('input',()=>{totalVal.textContent=totalSlider.value;});
+  totalSlider.addEventListener('change',()=>{sim.reset(parseInt(totalSlider.value)); logbox.innerHTML=''; redraw();});
+  redraw();
+}
+
+buildH1();
+buildLab(document.getElementById('lab-h2'),'heap2',256);
+buildLab(document.getElementById('lab-h3'),'heap3',256);
+buildLab(document.getElementById('lab-h4'),'heap4',256);
+
+/* foundations alignment mini-demo */
+function renderAlignDemo(){
+  const sizeEl=document.getElementById('align-demo-size');
+  const alEl=document.getElementById('align-demo-al');
+  const bar=document.getElementById('align-demo-bar');
+  function draw(){
+    const req=Math.max(1,parseInt(sizeEl.value)||1);
+    const a=Math.max(1,parseInt(alEl.value)||1);
+    const aligned=align(req,a);
+    const total=aligned+HEADER+40; // + a bit of remaining free heap for context
+    bar.innerHTML='';
+    const hdr=document.createElement('div'); hdr.className='blk alloc'; hdr.style.width=(HEADER/total*100)+'%';
+    hdr.style.background='var(--header)'; hdr.title=`header ${HEADER}B`;
+    bar.appendChild(hdr);
+    const data=document.createElement('div'); data.className='blk alloc'; data.style.width=(req/total*100)+'%';
+    data.textContent=req+'B'; data.title=`your requested data: ${req}B`;
+    bar.appendChild(data);
+    if(aligned>req){
+      const pad=document.createElement('div'); pad.className='blk alloc'; pad.style.width=((aligned-req)/total*100)+'%';
+      pad.style.background='repeating-linear-gradient(45deg,#7a5324 0 3px,#e8973d 3px 6px)';
+      pad.title=`padding to reach ${a}-byte alignment: ${aligned-req}B wasted (internal fragmentation)`;
+      bar.appendChild(pad);
+    }
+    const free=document.createElement('div'); free.className='blk free'; free.style.width=(40/total*100)+'%';
+    free.textContent='rest of heap';
+    bar.appendChild(free);
+  }
+  sizeEl.addEventListener('input',draw); alEl.addEventListener('input',draw);
+  draw();
+}
+renderAlignDemo();
+
+/* ===================== quiz ===================== */
+const mcqs=[
+  {q:'Heap has free blocks of 5B, 200B, 100B (in that address order). You request 20B in heap_4. Which block gets used?',
+   opts:[{t:'the 5B block',ok:false},{t:'the 100B block',ok:false},{t:'the 200B block',ok:true}],
+   exp:'First-fit walks the list in order and stops at the first block big enough. 5B is too small, so it stops at 200B — even though 100B would have wasted less space. That\'s the price of first-fit.'},
+  {q:'Same free blocks, but this time in heap_2. Which block gets used for a 20B request?',
+   opts:[{t:'the 200B block',ok:false},{t:'the 100B block',ok:true},{t:'fails — no block fits',ok:false}],
+   exp:'Best-fit scans everything and picks the smallest sufficient block: 100B, not 200B. Best-fit minimizes slack per-allocation, at the cost of a full list scan every time.'},
+  {q:'You free two physically adjacent 16B blocks in heap_2, then request 24B. What happens?',
+   opts:[{t:'Succeeds — two adjacent holes act like one',ok:false},{t:'Fails — heap_2 never coalesces adjacent free blocks',ok:true}],
+   exp:'This is the single most-tested heap_2 fact in interviews: no coalescing, ever, no matter how adjacent the blocks are.'},
+  {q:'Which heap type gives the most deterministic (bounded, O(1)) allocation time?',
+   opts:[{t:'heap_1',ok:true},{t:'heap_2',ok:false},{t:'heap_4',ok:false}],
+   exp:'heap_1 never searches anything — it just bumps a pointer. Every other heap here does an O(n) list walk in the worst case.'},
+];
+const mcqBox=document.getElementById('quiz-mcqs');
+mcqs.forEach((m,i)=>{
+  const d=document.createElement('div'); d.className='mcq';
+  const p=document.createElement('p'); p.textContent=`${i+1}. ${m.q}`;
+  const optsDiv=document.createElement('div'); optsDiv.className='opts';
+  const exp=document.createElement('div'); exp.className='exp'; exp.textContent=m.exp;
+  m.opts.forEach(o=>{
+    const b=document.createElement('button'); b.textContent=o.t;
+    b.onclick=()=>{
+      [...optsDiv.children].forEach(c=>c.disabled=true);
+      b.classList.add(o.ok?'correct':'wrong');
+      if(!o.ok) m.opts.forEach((oo,j)=>{if(oo.ok)optsDiv.children[j].classList.add('correct');});
+      exp.style.display='block';
+    };
+    optsDiv.appendChild(b);
+  });
+  d.appendChild(p); d.appendChild(optsDiv); d.appendChild(exp);
+  mcqBox.appendChild(d);
+});
+
+const qas=[
+  {q:'Why does FreeRTOS ship five different heap implementations instead of one "best" allocator?',
+   a:'Because embedded systems span a huge range of tradeoffs between determinism, RAM overhead, fragmentation tolerance, and whether tasks are ever deleted. A safety-critical system that never frees memory wants heap_1\'s zero-fragmentation guarantee; a system that dynamically spawns/destroys tasks wants heap_4\'s coalescing. One-size-fits-all would be wrong for someone.'},
+  {q:'What exactly is stored in a FreeRTOS heap block\'s metadata/header?',
+   a:'A struct (commonly BlockLink_t) containing a pointer to the next free block (used only while the block is free / in the free list) and the block\'s size (with the top bit sometimes used as an "allocated" flag in heap_4/5). This struct sits just before the pointer returned to the caller, which is why the returned pointer is offset from the true block start.'},
+  {q:'Why is alignment padding necessary at all?',
+   a:'Many CPUs fault or slow down on misaligned accesses (e.g. a 4-byte word access must start at a 4-byte boundary). portBYTE_ALIGNMENT rounds every allocation up so the *next* block always starts on a valid boundary, at the cost of some internal fragmentation.'},
+  {q:'What\'s the real difference between internal and external fragmentation, and which heap type is most vulnerable to each?',
+   a:'Internal = wasted bytes inside a block you own (alignment padding, or heap_2\'s "remainder too small to split" slack). External = free bytes scattered across many holes, none individually large enough. heap_2 is the poster child for external fragmentation since it never coalesces; internal fragmentation exists a little in every heap that does alignment.'},
+  {q:'Is any FreeRTOS heap implementation truly hard-real-time deterministic once free() is supported?',
+   a:'Not in the strict O(1) sense — heap_2/3/4 all do an O(n) free-list walk in the worst case. Only heap_1\'s bump allocator is O(1). In practice heap_4 is "deterministic enough" for most systems because heaps are small and searches are fast, but a hard-real-time certifier would flag it as not formally bounded.'},
+  {q:'How does heap_4 achieve thread safety, and why does it matter for an ISR calling pvPortMalloc?',
+   a:'It wraps the free-list mutation in a critical section (interrupts disabled briefly / scheduler-protected region) so a context switch or nested ISR can\'t observe or corrupt a half-updated free list. Note: pvPortMalloc/vPortFree are documented as unsafe to call from an ISR in most ports — that\'s what the heap_x "FromISR" variants (where they exist) or careful design are for.'},
+  {q:'Why does heap_3 not respect configTOTAL_HEAP_SIZE?',
+   a:'Because heap_3 doesn\'t manage its own static array at all — it forwards straight to the C library\'s malloc/free, whose backing memory (often controlled by linker heap symbols / sbrk) is entirely outside FreeRTOS\'s bookkeeping.'},
+  {q:'A colleague suggests switching from heap_4 to heap_2 to "save the coalescing overhead." Good idea?',
+   a:'Almost never. The coalescing check is cheap (compare two adjacent pointers) — nowhere near heap_2\'s cost of an exhaustive best-fit scan on every single allocation. You\'d trade a tiny, bounded cost for the exact defect (external fragmentation) that got heap_2 deprecated.'},
+];
+const detBox=document.getElementById('quiz-details');
+qas.forEach(x=>{
+  const d=document.createElement('details'); d.className='q';
+  const s=document.createElement('summary'); s.textContent=x.q;
+  const a=document.createElement('div'); a.className='ans'; a.textContent=x.a;
+  d.appendChild(s); d.appendChild(a);
+  detBox.appendChild(d);
+});
+</script>
+</body>
+</html>
